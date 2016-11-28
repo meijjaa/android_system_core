@@ -29,9 +29,6 @@
 #include <sys/socket.h>
 #include <sys/mount.h>
 #include <sys/resource.h>
-#ifndef NO_FINIT_MODULE
-#include <sys/syscall.h>
-#endif
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -51,6 +48,7 @@
 #include <bootloader_message/bootloader_message.h>
 #include <cutils/partition_utils.h>
 #include <cutils/android_reboot.h>
+#include <cutils/probe_module.h>
 #include <logwrap/logwrap.h>
 #include <private/android_filesystem_config.h>
 
@@ -71,35 +69,7 @@ using android::base::StringPrintf;
 #define UNMOUNT_CHECK_MS 5000
 #define UNMOUNT_CHECK_TIMES 10
 
-#ifdef NO_FINIT_MODULE
-// System call provided by bionic but not in any header file.
-extern "C" int init_module(void *, unsigned long, const char *);
-#endif
-
 static const int kTerminateServiceDelayMicroSeconds = 50000;
-
-static int insmod(const char *filename, const char *options) {
-#ifndef NO_FINIT_MODULE
-    int fd = open(filename, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
-    if (fd == -1) {
-        ERROR("insmod: open(\"%s\") failed: %s", filename, strerror(errno));
-#else
-    std::string module;
-    if (!read_file(filename, &module)) {
-#endif
-        return -1;
-    }
-#ifndef NO_FINIT_MODULE
-    int rc = syscall(__NR_finit_module, fd, options, 0);
-    if (rc == -1) {
-        ERROR("finit_module for \"%s\" failed: %s", filename, strerror(errno));
-    }
-    close(fd);
-    return rc;
-#else
-    return init_module(&module[0], module.size(), options);
-#endif
-}
 
 static int __ifupdown(const char *interface, int up) {
     struct ifreq ifr;
@@ -575,9 +545,14 @@ static int do_mount_all(const std::vector<std::string>& args) {
             ret = -1;
         }
     } else if (pid == 0) {
+        std::string filename_val;
+        if (!expand_props(args[1], &filename_val)) {
+            ERROR("mount_all: cannot expand '%s'\n", fstabfile);
+            _exit(-1);
+        }
         /* child, call fs_mgr_mount_all() */
         klog_set_level(6);  /* So we can see what fs_mgr_mount_all() does */
-        fstab = fs_mgr_read_fstab(fstabfile);
+        fstab = fs_mgr_read_fstab(filename_val.c_str());
         child_ret = fs_mgr_mount_all(fstab);
         fs_mgr_free_fstab(fstab);
         if (child_ret == -1) {
@@ -783,13 +758,96 @@ static int do_rmdir(const std::vector<std::string>& args) {
     return rmdir(args[1].c_str());
 }
 
+// read persist property from /data/property directly, because it maybe has not loaded
+// if the file not found, try to call property_get, the default value could be saved
+// into /default.prop
+static std::string persist_property_get(const char *name)
+{
+    const char *filename_template = "/data/property/%s";
+    size_t max_file_name_len = strlen(filename_template) + PROP_NAME_MAX;
+    char filename[max_file_name_len];
+    snprintf(filename, max_file_name_len, filename_template, name);
+
+    if (access(filename, 0) == 0) {
+        char *line = NULL;
+        size_t len;
+        FILE *fp = fopen(filename, "r+");
+        if (fp == NULL) {
+            ERROR("failed to read file for property:%s\n", filename);
+            return 0;
+        }
+
+        std::string result;
+        if (getline(&line, &len, fp) == -1) {
+            len = 0;
+        } else {
+            for (len = 0; *(line+len) != '\n' && *(line+len) != 0; len++);
+            *(line + len) = '\0';
+            result = line;
+            free(line);
+        }
+        fclose(fp);
+        return result;
+    }
+
+    return property_get(name);
+}
+
 static int do_sysclktz(const std::vector<std::string>& args) {
     struct timezone tz;
+    struct timeval tv;
+    struct tm tm;
+    time_t t;
 
     memset(&tz, 0, sizeof(tz));
-    tz.tz_minuteswest = std::stoi(args[1]);
-    if (settimeofday(NULL, &tz))
+    memset(&tv, 0, sizeof(tv));
+    memset(&tm, 0, sizeof(tm));
+
+    INFO("sysclktz: the arg %s is ignored, only persist.rtc_local_time matters\n", args[1].c_str());
+
+    if (gettimeofday(&tv, NULL)) {
+        ERROR("sysclktz: failed to call gettimeofday");
         return -1;
+    }
+
+    if (persist_property_get("persist.rtc_local_time") == "1") {
+        /* Notify kernel that hwtime use local time */
+        write_file("/sys/class/misc/alarm/rtc_local_time", "1");
+        /*
+         * If ro.hwtime.mode is local, set system time
+         * and saved system zone in case of network not
+         * available and auto syncing time not available.
+         */
+
+        std::string time_zone = persist_property_get("persist.sys.timezone");
+        if (time_zone.empty()) {
+            INFO("sysclktz: persist.sys.timezone not found\n");
+            tz.tz_minuteswest = 0;
+        } else {
+            const char *timezone_prop = time_zone.c_str();
+            INFO("sysclktz: persist.sys.timezone: %s\n", timezone_prop);
+            // localtime_r need the property, we need to set it
+            property_set("persist.sys.timezone", timezone_prop);
+            t = tv.tv_sec;
+            localtime_r(&t, &tm);
+            tz.tz_minuteswest = -(tm.tm_gmtoff / 60);
+            INFO("sysclktz: tz.tz_minuteswest: %d\n", tz.tz_minuteswest);
+        }
+
+        /*
+         * At this moment, system time should be local
+         * time too, set it back to utc which linux required.
+         */
+        tv.tv_sec += tz.tz_minuteswest * 60;
+        if (settimeofday(&tv, &tz)) {
+            ERROR("sysclktz: failed to call settimeofdays\n");
+            return -1;
+        }
+    } else {
+        tz.tz_minuteswest = std::stoi(args[1]);
+        return settimeofday(NULL, &tz);
+    }
+
     return 0;
 }
 

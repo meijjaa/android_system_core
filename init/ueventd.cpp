@@ -15,12 +15,14 @@
  */
 
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <android-base/stringprintf.h>
 #include <private/android_filesystem_config.h>
@@ -68,8 +70,12 @@ int ueventd_main(int argc, char **argv)
 
     boot_device = property_get("ro.boot.bootdevice");
 
-    device_init();
+    pid_t pid = fork();
+    if (pid < 0) {
+        ERROR("could not fork to process firmware event: %s\n", strerror(errno));
+    }
 
+    device_init(pid == 0);
     pollfd ufd;
     ufd.events = POLLIN;
     ufd.fd = get_device_fd();
@@ -81,7 +87,7 @@ int ueventd_main(int argc, char **argv)
             continue;
         }
         if (ufd.revents & POLLIN) {
-            handle_device_fd();
+            handle_device_fd(pid == 0);
         }
     }
 

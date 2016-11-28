@@ -68,6 +68,7 @@ include $(BUILD_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_CPPFLAGS := $(init_cflags)
+LOCAL_CPPFLAGS += -DTARGET_PRODUCT=\"$(TARGET_PRODUCT)\"
 LOCAL_SRC_FILES:= \
     bootchart.cpp \
     builtins.cpp \
@@ -97,10 +98,6 @@ endif
 
 ifneq ($(TARGET_IGNORE_RO_BOOT_REVISION),)
 LOCAL_CFLAGS += -DIGNORE_RO_BOOT_REVISION
-endif
-
-ifeq ($(KERNEL_HAS_FINIT_MODULE), false)
-LOCAL_CFLAGS += -DNO_FINIT_MODULE
 endif
 
 ifneq ($(TARGET_INIT_UMOUNT_AND_FSCK_IS_UNSAFE),)
@@ -142,6 +139,7 @@ LOCAL_STATIC_LIBRARIES := \
 
 # Create symlinks
 LOCAL_POST_INSTALL_CMD := $(hide) mkdir -p $(TARGET_ROOT_OUT)/sbin; \
+    ln -sf ../init $(TARGET_ROOT_OUT)/sbin/modprobe; \
     ln -sf ../init $(TARGET_ROOT_OUT)/sbin/ueventd; \
     ln -sf ../init $(TARGET_ROOT_OUT)/sbin/watchdogd
 
