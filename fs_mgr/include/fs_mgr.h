@@ -40,6 +40,13 @@ enum verity_mode {
     VERITY_MODE_DEFAULT = VERITY_MODE_RESTART
 };
 
+// Mount modes
+enum mount_mode {
+    MOUNT_MODE_DEFAULT = 0,
+    MOUNT_MODE_EARLY = 1,
+    MOUNT_MODE_LATE = 2
+};
+
 /*
  * The entries must be kept in the same order as they were seen in the fstab.
  * Unless explicitly requested, a lookup on mount point should always
@@ -112,6 +119,7 @@ int fs_mgr_is_noemulatedsd(const struct fstab_rec *fstab);
 int fs_mgr_is_notrim(struct fstab_rec *fstab);
 int fs_mgr_is_formattable(struct fstab_rec *fstab);
 int fs_mgr_is_nofail(struct fstab_rec *fstab);
+int fs_mgr_is_latemount(struct fstab_rec *fstab);
 int fs_mgr_swapon_all(struct fstab *fstab);
 int fs_mgr_is_mdtp_activated(void);
 

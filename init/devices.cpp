@@ -65,6 +65,10 @@ static const char *firmware_dirs[] = { "/etc/firmware",
 #define READ_MODULES_ALIAS	1
 #define READ_MODULES_BLKLST	2
 
+#define MODULES_BLKLST  "/system/etc/modules.blacklist"
+#define READ_MODULES_ALIAS	1
+#define READ_MODULES_BLKLST	2
+
 extern struct selabel_handle *sehandle;
 
 extern std::string boot_device;
