@@ -60,18 +60,22 @@ on init
     mount cgroup none /dev/stune schedtune
     mkdir /dev/stune/foreground
     mkdir /dev/stune/background
+    mkdir /dev/stune/system-background
     mkdir /dev/stune/top-app
     chown system system /dev/stune
     chown system system /dev/stune/foreground
     chown system system /dev/stune/background
+    chown system system /dev/stune/system-background
     chown system system /dev/stune/top-app
     chown system system /dev/stune/tasks
     chown system system /dev/stune/foreground/tasks
     chown system system /dev/stune/background/tasks
+    chown system system /dev/stune/system-background/tasks
     chown system system /dev/stune/top-app/tasks
     chmod 0664 /dev/stune/tasks
     chmod 0664 /dev/stune/foreground/tasks
     chmod 0664 /dev/stune/background/tasks
+    chmod 0664 /dev/stune/system-background/tasks
     chmod 0664 /dev/stune/top-app/tasks
 
     # Mount staging areas for devices managed by vold
@@ -244,7 +248,7 @@ on init
     # expecting it to point to /proc/self/fd
     symlink /proc/self/fd /dev/fd
 
-    export DOWNLOAD_CACHE /data/cache
+    export DOWNLOAD_CACHE ${ro.device.cache_dir}
 
     # set RLIMIT_NICE to allow priorities from 19 to -20
     setrlimit 13 40 40
